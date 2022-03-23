@@ -94,6 +94,16 @@
   (do-pure-eval `(expand ',expr)
                 (force (level-next level))))
 
+;; Bare bones expander.
+(define expand-definition
+  '(define expand
+     (lambda (e)
+       (if (pair? e)
+           (if (eq? (car e) 'eval-in-expansion-world)
+               (eval (car (cdr e)))
+               e)
+           e))))
+
 (define expand-definition-meaning (pure-meaning expand-definition))
 
 (define (create-level)
@@ -112,16 +122,6 @@
        (run (meaning-expr expand-definition-meaning)
             next-level)
        next-level))))
-
-;; Bare bones expander.
-(define expand-definition
-  '(define expand
-     (lambda (e)
-       (if (pair? e)
-           (if (eq? (car e) 'eval-in-expansion-world)
-               (eval (car (cdr e)))
-               e)
-           e))))
 
 ;; Repl
 (define level-0 (create-level))
