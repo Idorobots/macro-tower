@@ -39,14 +39,6 @@
 
 (load "evaluate.scm")
 
-(define (enrich env variables)
-  (append (map (lambda (v)
-                 (cons v (box (when #f #f))))
-               (filter (lambda (v)
-                         (not (env-get env v)))
-                       variables))
-          env))
-
 (define (env-set! env var value)
   (let ((v (env-get env var)))
     (if v
@@ -74,8 +66,8 @@
 (define (do-pure-eval expr level)
   (let ((mn (pure-meaning expr)))
     (set-level-env! level
-                    (enrich (level-env level)
-                            (meaning-free-vars mn)))
+                    (extend-env (level-env level)
+                                (meaning-free-vars mn)))
     (run (meaning-expr mn)
          level)))
 
@@ -94,9 +86,9 @@
    (delay
      (let ((next-level (create-level)))
        (set-level-env! next-level
-                       (enrich (level-env next-level)
-                               (cons 'eval
-                                     (meaning-free-vars expand-definition-meaning))))
+                       (extend-env (level-env next-level)
+                                   (cons 'eval
+                                         (meaning-free-vars expand-definition-meaning))))
        (env-set! (level-env next-level)
                  'eval
                  (lambda (value)
@@ -175,7 +167,7 @@
           (set! macro-env
                 (form-extend macro-env name expander))
           #f))
-    #t)))
+      #t)))
 
 (define local-macros
   '(eval-in-expansion-world

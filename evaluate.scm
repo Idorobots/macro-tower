@@ -48,17 +48,22 @@
         (cons '>= >=)
         (cons 'error error)))
 
-(define (extend-env env var value)
-  (let ((v (env-get env var)))
-    (if (and v (box? (cdr v)))
-        ;; FIXME Please no mutation.
-        (begin (set-box! (cdr v) value)
-               env)
-        (cons (cons var (box value))
-              env))))
+(define (extend-env env variables)
+  (append (map (lambda (v)
+                 (cons v (box (when #f #f))))
+               (filter (lambda (v)
+                         (not (env-get env v)))
+                       variables))
+          env))
 
 (define (env-get env var)
   (assoc var env))
+
+(define (env-set! env var value)
+  (let ((v (env-get env var)))
+    (if v
+        (set-box! (cdr v) value)
+        (error "Unassignable variable" var))))
 
 (define (resulting-value env val)
   val)
@@ -97,26 +102,20 @@
                  (evaluate-list env (cdr exp) cont))
 
                 ((set!)
-                 (let ((def (env-get env (cadr exp))))
-                   (cond ((not def)
-                          (error "Undefined variable" (cadr exp)))
-                         ((not (box? (cdr def)))
-                          (error "Unassignable variable" (cadr exp)))
-                         (else
-                          (evaluate env (caddr exp)
-                                    (lambda (env value)
-                                      (set-box! (cdr def) value)
-                                      (cont env value)))))))
+                 (evaluate env
+                           (caddr exp)
+                           (lambda (env value)
+                             (env-set! env (cadr exp) value)
+                             (cont env value))))
 
                 ((define)
                  (let* ((name (cadr exp))
                         (value (caddr exp))
-                        (extended-env (extend-env env name (when #f #f))))
+                        (extended-env (extend-env env (list name))))
                    (evaluate extended-env
                              value
                              (lambda (_ executed)
-                               (set-box! (cdr (env-get extended-env name))
-                                         executed)
+                               (env-set! extended-env name executed)
                                (cont extended-env
                                      (when #f #f))))))
 
@@ -127,14 +126,11 @@
                          (lambda args
                            (if (equal? (length args)
                                        (length formals))
-                               (let ((extended-env (foldl (lambda (binding env)
-                                                            (extend-env env
-                                                                        (car binding)
-                                                                        (cdr binding)))
-                                                          env
-                                                          (map cons
-                                                               formals
-                                                               args))))
+                               (let ((extended-env (extend-env env formals)))
+                                 (map (lambda (n v)
+                                        (env-set! extended-env n v))
+                                      formals
+                                      args)
                                  (evaluate-list extended-env
                                                 body
                                                 resulting-value))
