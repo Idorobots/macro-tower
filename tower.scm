@@ -42,7 +42,9 @@
 (define (enrich env variables)
   (append (map (lambda (v)
                  (cons v (box (when #f #f))))
-               variables)
+               (filter (lambda (v)
+                         (not (env-get env v)))
+                       variables))
           env))
 
 (define (env-set! env var value)
@@ -55,9 +57,6 @@
   (evaluate (level-env level)
             expr
             (lambda (env result)
-              ;; NOTE The env might have been updated during evaluation.
-              (set-level-env! level
-                              env)
               result)))
 
 (define (make-level env next)

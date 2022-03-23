@@ -49,8 +49,13 @@
         (cons 'error error)))
 
 (define (extend-env env var value)
-  (cons (cons var value)
-        env))
+  (let ((v (env-get env var)))
+    (if (and v (box? (cdr v)))
+        ;; FIXME Please no mutation.
+        (begin (set-box! (cdr v) value)
+               env)
+        (cons (cons var (box value))
+              env))))
 
 (define (env-get env var)
   (assoc var env))
@@ -63,7 +68,7 @@
          (let ((def (env-get env exp)))
            (cond ((not def)
                   (error "Undefined variable" exp))
-                 ;; NOTE These are introduced by define & lambdas.
+                 ;; NOTE These are introduced by extend-env.
                  ((box? (cdr def))
                   (cont env (unbox (cdr def))))
                  (else
@@ -93,17 +98,20 @@
 
                 ((set!)
                  (let ((def (env-get env (cadr exp))))
-                   (if def
-                       (evaluate env (caddr exp)
-                                 (lambda (env value)
-                                   (set-box! (cdr def) value)
-                                   (cont env value)))
-                       (error "Undefined variable" (cadr exp)))))
+                   (cond ((not def)
+                          (error "Undefined variable" (cadr exp)))
+                         ((not (box? (cdr def)))
+                          (error "Unassignable variable" (cadr exp)))
+                         (else
+                          (evaluate env (caddr exp)
+                                    (lambda (env value)
+                                      (set-box! (cdr def) value)
+                                      (cont env value)))))))
 
                 ((define)
                  (let* ((name (cadr exp))
                         (value (caddr exp))
-                        (extended-env (extend-env env name (box #f))))
+                        (extended-env (extend-env env name (when #f #f))))
                    (evaluate extended-env
                              value
                              (lambda (_ executed)
@@ -122,7 +130,7 @@
                                (let ((extended-env (foldl (lambda (binding env)
                                                             (extend-env env
                                                                         (car binding)
-                                                                        (box (cdr binding))))
+                                                                        (cdr binding)))
                                                           env
                                                           (map cons
                                                                formals
