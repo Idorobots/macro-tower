@@ -19,6 +19,22 @@
 (define (collect-symbols expr)
   (cond ((symbol? expr)
          (list expr))
+        ((and (pair? expr)
+              (> (length expr) 1))
+         (case (car expr)
+           ((lambda)
+            ;; NOTE Filter out bould variables.
+            (filter (lambda (s)
+                      (not (member s (cadr expr))))
+                    (collect-symbols (cddr expr))))
+           ((define)
+            ;; NOTE Filter out bould variables.
+            (filter (lambda (s)
+                      (not (eq? s (cadr expr))))
+                    (collect-symbols (cddr expr))))
+           (else
+            (append (collect-symbols (car expr))
+                    (collect-symbols (cdr expr))))))
         ((pair? expr)
          (append (collect-symbols (car expr))
                  (collect-symbols (cdr expr))))
@@ -87,8 +103,8 @@
      (let ((next-level (create-level)))
        (set-level-env! next-level
                        (extend-env (level-env next-level)
-                                   (cons 'eval
-                                         (meaning-free-vars expand-definition-meaning))))
+                                   (append '(eval expand)
+                                           (meaning-free-vars expand-definition-meaning))))
        (env-set! (level-env next-level)
                  'eval
                  (lambda (value)
@@ -167,7 +183,8 @@
           (set! macro-env
                 (form-extend macro-env name expander))
           #f))
-      #t)))
+      ;; FIXME Needs to be here because otherwise it's excluded from free vars.
+      install-macro-form!)))
 
 (define local-macros
   '(eval-in-expansion-world
@@ -175,12 +192,12 @@
      'let-abbreviation
      (lambda (e m)
        (really-expand
-        `(begin ,@(cdr (cdr e)))
+        (cons 'begin (cdr (cdr e)))
         (form-extend m
                      (car (car (car (cdr e))))
                      (again-izer
                       ((lambda (expander)
                          (lambda (ee mm)
                            (apply expander (cdr ee))))
-                       (eval `(lambda ,(cdr (car (car (cdr e))))
-                                ,@(cdr (car (cdr e)))))))))))))
+                       (eval (append (list 'lambda (cdr (car (car (cdr e)))))
+                                     (cdr (car (cdr e)))))))))))))
