@@ -19,16 +19,17 @@
 (define (collect-symbols expr)
   (cond ((symbol? expr)
          (list expr))
-        ((and (pair? expr)
+        ((and (list? expr)
               (> (length expr) 1))
          (case (car expr)
            ((lambda)
             ;; NOTE Filter out bould variables.
-            (filter (lambda (s)
-                      (not (member s (cadr expr))))
-                    (collect-symbols (cddr expr))))
+            (let ((formals (collect-symbols (cadr expr))))
+              (filter (lambda (s)
+                        (not (member s formals)))
+                      (collect-symbols (cddr expr)))))
            ((define)
-            ;; NOTE Filter out bould variables.
+            ;; NOTE Filter out bould name.
             (filter (lambda (s)
                       (not (eq? s (cadr expr))))
                     (collect-symbols (cddr expr))))
@@ -64,8 +65,7 @@
 (define (run expr level)
   (evaluate (level-env level)
             expr
-            (lambda (env result)
-              result)))
+            resulting-value))
 
 (define (make-level env next)
   (vector 'level env next))
@@ -135,69 +135,113 @@
 
 ;; A better expander.
 (define better-expander
-  '(eval-in-expansion-world
-    (begin
-      (define expand
-        (lambda (e)
-          (really-expand e global-expand-env)))
-      (define macro-env
-        (lambda (e)
-          (if (pair? e)
-              (if (eq? (car e) 'eval-in-expansion-world)
-                  (lambda (e m) (eval (car (cdr e))))
-                  (if (eq? (car e) 'quote)
-                      (lambda (e m) e)
-                      #f))
-              #f)))
-      (define global-expand-env
-        (lambda (e)
-          (macro-env e)))
-      (define really-expand
-        (lambda (e m)
-          ((lambda (expander)
-             (if expander
-                 (expander e m)
-                 (default-expand e m)))
-           (m e))))
-      (define default-expand
-        (lambda (e m)
-          (if (pair? e)
-              ((lambda (a)
-                 (cons a (really-expand (cdr e) m)))
-               (really-expand (car e) m))
-              e)))
-      (define again-izer
-        (lambda (expander)
-          (lambda (e m)
-            (really-expand (expander e m) m))))
-      (define form-extend
-        (lambda (m key fn)
-          (lambda (ee)
-            (if (pair? ee)
-                (if (eq? (car ee) key)
-                    fn
-                    (m ee))
-                (m ee)))))
-      (define install-macro-form!
-        (lambda (name expander)
-          (set! macro-env
-                (form-extend macro-env name expander))
-          #f))
-      ;; FIXME Needs to be here because otherwise it's excluded from free vars.
-      install-macro-form!)))
+  '(begin
+     (define expand
+       (lambda (e)
+         (really-expand e global-expand-env)))
+     (define macro-env
+       (lambda (e)
+         (if (pair? e)
+             (if (eq? (car e) 'eval-in-expansion-world)
+                 (lambda (e m) (eval (car (cdr e))))
+                 (if (eq? (car e) 'quote)
+                     (lambda (e m) e)
+                     #f))
+             #f)))
+     (define global-expand-env
+       (lambda (e)
+         (macro-env e)))
+     (define really-expand
+       (lambda (e m)
+         ((lambda (expander)
+            (if expander
+                (expander e m)
+                (default-expand e m)))
+          (m e))))
+     (define default-expand
+       (lambda (e m)
+         (if (pair? e)
+             ((lambda (a)
+                (cons a (really-expand (cdr e) m)))
+              (really-expand (car e) m))
+             e)))
+     (define again-izer
+       (lambda (expander)
+         (lambda (e m)
+           (really-expand (expander e m) m))))
+     (define form-extend
+       (lambda (m key fn)
+         (lambda (ee)
+           (if (pair? ee)
+               (if (eq? (car ee) key)
+                   fn
+                   (m ee))
+               (m ee)))))
+     (define install-macro-form!
+       (lambda (name expander)
+         (set! macro-env
+               (form-extend macro-env name expander))
+         #f))
+     ;; FIXME Needs to be here because otherwise it's excluded from free vars.
+     install-macro-form!))
 
 (define local-macros
-  '(eval-in-expansion-world
-    (install-macro-form!
-     'let-abbreviation
-     (lambda (e m)
-       (really-expand
-        (cons 'begin (cdr (cdr e)))
-        (form-extend m
-                     (car (car (car (cdr e))))
-                     (again-izer
-                      ((lambda (expander)
-                         (lambda (ee mm)
-                           (apply expander (cdr ee))))
-                       (eval (append (list 'lambda (cdr (car (car (cdr e)))))
-                                     (cdr (car (cdr e)))))))))))))
+  '(install-macro-form!
+    'let-abbreviation ;; (let-abbreviation ((key params ...) expansion ...) scope ...)
+    (lambda (e m)
+      (really-expand
+       (cons 'begin (cdr (cdr e)))
+       (form-extend m
+                    (car (car (car (cdr e))))
+                    (again-izer
+                     ((lambda (expander)
+                        (lambda (ee mm)
+                          (apply expander (cdr ee))))
+                      (eval (append (list 'lambda (cdr (car (car (cdr e)))))
+                                    (cdr (car (cdr e))))))))))))
+
+(define global-macros
+  '(install-macro-form!
+    'define-abbreviation ;; (define-abbreviation (key params ...) expansion ...)
+    (lambda (e m)
+      (install-macro-form!
+       (car (car (cdr e)))
+       (again-izer
+        ((lambda (expander)
+           (lambda (ee mm)
+             (apply expander (cdr ee))))
+         (eval (append (list 'lambda (cdr (car (cdr e))))
+                       (cdr (cdr e))))))))))
+
+(do-eval '(eval-in-expansion-world
+           (begin (install-macro-form!
+                  'foo
+                  (lambda (e m)
+                    e))))
+         level-0)
+
+(do-eval '(foo 23) level-0)
+
+(do-eval `(eval-in-expansion-world
+           (begin ,better-expander
+                  ,local-macros
+                  ,global-macros))
+         level-0)
+
+(do-eval '(let-abbreviation
+           ((progn . body)
+            (let-abbreviation
+             ((sequence . body)
+              (cons 'begin body))
+             (sequence (display "Use begin instead of progn!")
+                       (cons 'begin body))))
+           (progn 5 23))
+         level-0)
+
+(do-eval '(begin (define-abbreviation (progn . body)
+                   (define-abbreviation (sequence . body)
+                     (cons 'begin body))
+                   (sequence (display "Use begin instead of progn!")
+                             (cons 'begin body)))
+                 (progn 23 5))
+         level-0)

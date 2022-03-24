@@ -46,7 +46,8 @@
         (cons '> >)
         (cons '<= <=)
         (cons '>= >=)
-        (cons 'error error)))
+        (cons 'error error)
+        (cons 'apply apply)))
 
 (define (extend-env env variables)
   (append (map (lambda (v)
@@ -124,17 +125,24 @@
                        (body (cddr exp)))
                    (cont env
                          (lambda args
-                           (if (equal? (length args)
-                                       (length formals))
-                               (let ((extended-env (extend-env env formals)))
-                                 (map (lambda (n v)
-                                        (env-set! extended-env n v))
-                                      formals
-                                      args)
+                           (if (list? formals)
+                               (if (equal? (length args)
+                                           (length formals))
+                                   (let ((extended-env (extend-env env formals)))
+                                     (map (lambda (n v)
+                                            (env-set! extended-env n v))
+                                          formals
+                                          args)
+                                     (evaluate-list extended-env
+                                                    body
+                                                    resulting-value))
+                                   (error "Arity mismatch" (length args)))
+                               ;; NOTE Only supports "catch-all" parameter.
+                               (let ((extended-env (extend-env env (list formals))))
+                                 (env-set! extended-env formals args)
                                  (evaluate-list extended-env
                                                 body
-                                                resulting-value))
-                               (error "Arity mismatch" (length args)))))))
+                                                resulting-value)))))))
 
                 (else
                  (begin
@@ -146,9 +154,11 @@
                                      (evaluate-args env-acc (cons arg acc) (cdr args) cont)))))
                    (evaluate env (car exp)
                              (lambda (_ op)
-                               (evaluate-args env '() (cdr exp)
-                                              (lambda (_ args)
-                                                (cont env (apply op args))))))))))))
+                               (if (procedure? op)
+                                   (evaluate-args env '() (cdr exp)
+                                                  (lambda (_ args)
+                                                    (cont env (apply op args))))
+                                   (error "Invalid function specified at" (car exp)))))))))))
 
 (define (evaluate-list env exps cont)
   (define (evaluate-list-aux env-acc acc exps cont)
