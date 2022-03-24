@@ -47,7 +47,9 @@
         (cons '<= <=)
         (cons '>= >=)
         (cons 'error error)
-        (cons 'apply apply)))
+        (cons 'apply apply)
+        (cons 'display display)
+        (cons 'newline newline)))
 
 (define (extend-env env variables)
   (append (map (lambda (v)

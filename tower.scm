@@ -84,8 +84,7 @@
     (set-level-env! level
                     (extend-env (level-env level)
                                 (meaning-free-vars mn)))
-    (run (meaning-expr mn)
-         level)))
+    (run (meaning-expr mn) level)))
 
 (define (do-eval expr level)
   (do-pure-eval (do-expand expr level) level))
@@ -94,8 +93,29 @@
   (do-pure-eval `(expand ',expr)
                 (force (level-next level))))
 
+(define (expand-definition-meaning)
+  (pure-meaning expand-definition))
+
+(define (create-level)
+  (let ((expander (expand-definition-meaning)))
+    (make-level
+     (create-standard-env)
+     (delay
+       (let ((next-level (create-level)))
+         (set-level-env! next-level
+                         (extend-env (level-env next-level)
+                                     (append '(eval expand)
+                                             (meaning-free-vars expander))))
+         (env-set! (level-env next-level)
+                   'eval
+                   (lambda (value)
+                     (do-eval value next-level)))
+         (run (meaning-expr expander)
+              next-level)
+         next-level)))))
+
 ;; Bare bones expander.
-(define expand-definition
+(define minimal-expander
   '(define expand
      (lambda (e)
        (if (pair? e)
@@ -104,24 +124,56 @@
                e)
            e))))
 
-(define expand-definition-meaning (pure-meaning expand-definition))
+;; A better expander.
+(define better-expander
+  '(begin
+     (define expand
+       (lambda (exp)
+         ;; NOTE Car expansion might have modified the env, so for the cdr we reload it from global-macro-env.
 
-(define (create-level)
-  (make-level
-   (create-standard-env)
-   (delay
-     (let ((next-level (create-level)))
-       (set-level-env! next-level
-                       (extend-env (level-env next-level)
-                                   (append '(eval expand)
-                                           (meaning-free-vars expand-definition-meaning))))
-       (env-set! (level-env next-level)
-                 'eval
-                 (lambda (value)
-                   (do-eval value next-level)))
-       (run (meaning-expr expand-definition-meaning)
-            next-level)
-       next-level))))
+         (really-expand exp global-macro-env)))
+     (define global-macro-env
+       (list (cons 'quote
+                   (lambda (exp env) exp))
+             (cons 'eval-in-expansion-world
+                   (lambda (exp env) (eval (car (cdr exp)))))))
+     (define env-get
+       (lambda (env key)
+         ((lambda (def)
+            (if def
+                (cdr def)
+                #f))
+          (assoc key env))))
+     (define really-expand
+       (lambda (exp env)
+         (if (pair? exp)
+             ((lambda (expander)
+                (if expander
+                    (expander exp env)
+                    ((lambda (a)
+                       ;; NOTE Not ideal, as it can expand the cdr of '(foo eval-in-expansion-world bar).
+                       (cons a (really-expand (cdr exp) env)))
+                     (really-expand (car exp) env))))
+              (env-get env (car exp)))
+             exp)))
+     (define again-izer
+       (lambda (expander)
+         (lambda (exp env)
+           (really-expand (expander exp env) env))))
+     (define form-extend
+       (lambda (env key fn)
+         (cons (cons key fn)
+               env)))
+     (define install-macro-form!
+       (lambda (name expander)
+         (set! global-macro-env
+               (form-extend global-macro-env name expander))
+         #f))
+     ;; FIXME Needs to be here because otherwise it's excluded from free vars.
+     install-macro-form!
+     global-expand-env))
+
+(define expand-definition better-expander)
 
 ;; Repl
 (define level-0 (create-level))
@@ -133,57 +185,20 @@
     (newline)
     (loop)))
 
-;; A better expander.
-(define better-expander
-  '(begin
-     (define expand
-       (lambda (e)
-         (really-expand e global-expand-env)))
-     (define macro-env
-       (lambda (e)
-         (if (pair? e)
-             (if (eq? (car e) 'eval-in-expansion-world)
-                 (lambda (e m) (eval (car (cdr e))))
-                 (if (eq? (car e) 'quote)
-                     (lambda (e m) e)
-                     #f))
-             #f)))
-     (define global-expand-env
-       (lambda (e)
-         (macro-env e)))
-     (define really-expand
-       (lambda (e m)
-         ((lambda (expander)
-            (if expander
-                (expander e m)
-                (default-expand e m)))
-          (m e))))
-     (define default-expand
-       (lambda (e m)
-         (if (pair? e)
-             ((lambda (a)
-                (cons a (really-expand (cdr e) m)))
-              (really-expand (car e) m))
-             e)))
-     (define again-izer
-       (lambda (expander)
-         (lambda (e m)
-           (really-expand (expander e m) m))))
-     (define form-extend
-       (lambda (m key fn)
-         (lambda (ee)
-           (if (pair? ee)
-               (if (eq? (car ee) key)
-                   fn
-                   (m ee))
-               (m ee)))))
-     (define install-macro-form!
-       (lambda (name expander)
-         (set! macro-env
-               (form-extend macro-env name expander))
-         #f))
-     ;; FIXME Needs to be here because otherwise it's excluded from free vars.
-     install-macro-form!))
+;; Examples
+
+(do-eval '(begin (define foo 23) foo) level-0)
+
+(do-eval '(eval-in-expansion-world (begin (define foo 5) foo)) level-0)
+
+(do-eval '(eval-in-expansion-world
+           (begin (install-macro-form!
+                   'foo
+                   (lambda (e m)
+                     (list 'equal? (car e) (cadr e))))))
+         level-0)
+
+(do-eval '(foo 23) level-0)
 
 (define local-macros
   '(install-macro-form!
@@ -213,19 +228,17 @@
          (eval (append (list 'lambda (cdr (car (cdr e))))
                        (cdr (cdr e))))))))))
 
-(do-eval '(eval-in-expansion-world
-           (begin (install-macro-form!
-                  'foo
-                  (lambda (e m)
-                    e))))
-         level-0)
-
-(do-eval '(foo 23) level-0)
-
 (do-eval `(eval-in-expansion-world
            (begin ,better-expander
                   ,local-macros
                   ,global-macros))
+         level-0)
+
+(do-eval `(eval-in-expansion-world
+           (eval-in-expansion-world
+            (begin ,better-expander
+                  ,local-macros
+                  ,global-macros)))
          level-0)
 
 (do-eval '(let-abbreviation
@@ -238,6 +251,13 @@
            (progn 5 23))
          level-0)
 
+;; FIXME Requires three loads to work correctly due to how really-expand maintains the same macro-env throughout the expansion:
+;; - first one installs the progn macro and fails on the invocation,
+;; - second reinstalls the macro and invokes it, installs sequence and fails on its invocation,
+;; - third reinstalls both macros and invokes them successfully.
+;; This can be fixed by always using the global-macro-env, but then the let-abbreviation version won't work,
+;; as it'll "forget" the local definition on the recursive call to really-expand.
+;; A proper fix would be to _properly_ run expansion of scopes that introduce new bindings.
 (do-eval '(begin (define-abbreviation (progn . body)
                    (define-abbreviation (sequence . body)
                      (cons 'begin body))
