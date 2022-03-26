@@ -64,6 +64,27 @@
            (progn 5 23))
          level-0)
 
+(do-eval '(define-abbreviation (trace-lambda args . body)
+            (list 'lambda args
+                  '(display "Args: ")
+                  (list 'display (cons 'list args))
+                  '(newline)
+                  (list '(lambda (result)
+                           (display "Result: ")
+                           (display result)
+                           (newline)
+                           result)
+                        (cons 'begin body))))
+         level-0)
+
+(do-eval '(begin
+            (define foo (trace-lambda (x)
+                                      (if (eq? x 23)
+                                          x
+                                          (+ (foo (+ 1 x)) 1))))
+            (foo 5))
+         level-0)
+
 ;; FIXME Requires three loads to work correctly due to how really-expand maintains the same macro-env throughout the expansion:
 ;; - first one installs the progn macro and fails on the invocation,
 ;; - second reinstalls the macro and invokes it, installs sequence and fails on its invocation,

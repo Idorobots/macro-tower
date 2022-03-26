@@ -127,24 +127,23 @@
                        (body (cddr exp)))
                    (cont env
                          (lambda args
-                           (if (list? formals)
-                               (if (equal? (length args)
-                                           (length formals))
-                                   (let ((extended-env (extend-env env formals)))
-                                     (map (lambda (n v)
-                                            (env-set! extended-env n v))
-                                          formals
-                                          args)
-                                     (evaluate-list extended-env
-                                                    body
-                                                    resulting-value))
-                                   (error "Arity mismatch" (length args)))
-                               ;; NOTE Only supports "catch-all" parameter.
-                               (let ((extended-env (extend-env env (list formals))))
-                                 (env-set! extended-env formals args)
-                                 (evaluate-list extended-env
-                                                body
-                                                resulting-value)))))))
+                           (let loop ((f formals)
+                                      (a args)
+                                      (e env))
+                             (cond ((symbol? f)
+                                    (let ((extended-env (extend-env e (list f))))
+                                      (env-set! extended-env f a)
+                                      (evaluate-list extended-env
+                                                     body
+                                                     resulting-value)))
+                                   ((and (empty? f) (empty? a))
+                                    (evaluate-list e body resulting-value))
+                                   ((or (empty? f) (empty? a))
+                                    (error "Arity mismatch" (length args)))
+                                   (else
+                                    (let ((extended-env (extend-env e (list (car f)))))
+                                      (env-set! extended-env (car f) (car a))
+                                      (loop (cdr f) (cdr a) extended-env)))))))))
 
                 (else
                  (begin
