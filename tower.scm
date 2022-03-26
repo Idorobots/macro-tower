@@ -1,71 +1,6 @@
 ;; Macroexpansion reflective tower
 
-(define (make-meaning expr free-vars)
-  (vector 'meaning expr free-vars))
-
-(define (meaning-expr m)
-  (vector-ref m 1))
-
-(define (meaning-free-vars m)
-  (vector-ref m 2))
-
-(define (pure-meaning expr)
-  ;; FIXME Do this properly.
-  (make-meaning expr
-                (filter (lambda (s)
-                          (not (member s '(quote unquote quasiquote define if lambda begin set!))))
-                        (uniq (collect-symbols expr)))))
-
-(define (collect-symbols expr)
-  (cond ((symbol? expr)
-         (list expr))
-        ((and (list? expr)
-              (> (length expr) 1))
-         (case (car expr)
-           ((lambda)
-            ;; NOTE Filter out bould variables.
-            (let ((formals (collect-symbols (cadr expr))))
-              (filter (lambda (s)
-                        (not (member s formals)))
-                      (collect-symbols (cddr expr)))))
-           ((define)
-            ;; NOTE Filter out bould name.
-            (filter (lambda (s)
-                      (not (eq? s (cadr expr))))
-                    (collect-symbols (cddr expr))))
-           (else
-            (append (collect-symbols (car expr))
-                    (collect-symbols (cdr expr))))))
-        ((pair? expr)
-         (append (collect-symbols (car expr))
-                 (collect-symbols (cdr expr))))
-        (else
-         '())))
-
-(define (uniq lst)
-  (let loop ((acc '())
-             (lst lst))
-    (cond ((empty? lst)
-           (reverse acc))
-          ((member (car lst) acc)
-           (loop acc (cdr lst)))
-          (else
-           (loop (cons (car lst)
-                       acc)
-                 (cdr lst))))))
-
 (load "evaluate.scm")
-
-(define (env-set! env var value)
-  (let ((v (env-get env var)))
-    (if v
-        (set-box! (cdr v) value)
-        (error var (format "~a not found in env" var)))))
-
-(define (run expr level)
-  (evaluate (level-env level)
-            expr
-            resulting-value))
 
 (define (make-level env next)
   (vector 'level env next))
@@ -80,11 +15,11 @@
   (vector-ref l 2))
 
 (define (do-pure-eval expr level)
-  (let ((mn (pure-meaning expr)))
-    (set-level-env! level
-                    (extend-env (level-env level)
-                                (meaning-free-vars mn)))
-    (run (meaning-expr mn) level)))
+  (evaluate (level-env level)
+            expr
+            (lambda (env result)
+              (set-level-env! level env)
+              result)))
 
 (define (do-eval expr level)
   (do-pure-eval (do-expand expr level) level))
@@ -93,26 +28,22 @@
   (do-pure-eval `(expand ',expr)
                 (force (level-next level))))
 
-(define (expand-definition-meaning)
-  (pure-meaning expand-definition))
-
 (define (create-level)
-  (let ((expander (expand-definition-meaning)))
-    (make-level
-     (create-standard-env)
-     (delay
-       (let ((next-level (create-level)))
-         (set-level-env! next-level
-                         (extend-env (level-env next-level)
-                                     (append '(eval expand)
-                                             (meaning-free-vars expander))))
-         (env-set! (level-env next-level)
-                   'eval
-                   (lambda (value)
-                     (do-eval value next-level)))
-         (run (meaning-expr expander)
-              next-level)
-         next-level)))))
+  (make-level
+   (create-standard-env)
+   (delay
+     (let ((next-level (create-level)))
+       (set-level-env! next-level
+                       (extend-env (level-env next-level)
+                                   '(eval)))
+       (env-set! (level-env next-level)
+                 'eval
+                 (lambda (value)
+                   (do-eval value next-level)))
+       ;; NOTE The expander itself doesn't need expansion.
+       (do-pure-eval expand-definition
+                     next-level)
+       next-level))))
 
 ;; Bare bones expander.
 (define minimal-expander
@@ -127,11 +58,6 @@
 ;; A better expander.
 (define better-expander
   '(begin
-     (define expand
-       (lambda (exp)
-         ;; NOTE Car expansion might have modified the env, so for the cdr we reload it from global-macro-env.
-
-         (really-expand exp global-macro-env)))
      (define global-macro-env
        (list (cons 'quote
                    (lambda (exp env) exp))
@@ -156,6 +82,9 @@
                      (really-expand (car exp) env))))
               (env-get env (car exp)))
              exp)))
+     (define expand
+       (lambda (exp)
+         (really-expand exp global-macro-env)))
      (define again-izer
        (lambda (expander)
          (lambda (exp env)
@@ -168,10 +97,7 @@
        (lambda (name expander)
          (set! global-macro-env
                (form-extend global-macro-env name expander))
-         #f))
-     ;; FIXME Needs to be here because otherwise it's excluded from free vars.
-     install-macro-form!
-     global-expand-env))
+         #f))))
 
 (define expand-definition better-expander)
 
