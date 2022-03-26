@@ -51,13 +51,9 @@
         (cons 'display display)
         (cons 'newline newline)))
 
-(define (extend-env env variables)
-  (append (map (lambda (v)
-                 (cons v (box (when #f #f))))
-               (filter (lambda (v)
-                         (not (env-get env v)))
-                       variables))
-          env))
+(define (extend-env env var val)
+  (cons (cons var val)
+        env))
 
 (define (env-get env var)
   (assoc var env))
@@ -76,7 +72,7 @@
          (let ((def (env-get env exp)))
            (cond ((not def)
                   (error "Undefined variable" exp))
-                 ;; NOTE These are introduced by extend-env.
+                 ;; NOTE These are introduced by define & lambda.
                  ((box? (cdr def))
                   (cont env (unbox (cdr def))))
                  (else
@@ -114,10 +110,11 @@
                 ((define)
                  (let* ((name (cadr exp))
                         (value (caddr exp))
-                        (extended-env (extend-env env (list name))))
+                        (extended-env (extend-env env name (box (when #f #f)))))
                    (evaluate extended-env
                              value
                              (lambda (_ executed)
+                               ;; NOTE This is using set! so that recursive functions work correctly.
                                (env-set! extended-env name executed)
                                (cont extended-env
                                      (when #f #f))))))
@@ -131,19 +128,17 @@
                                       (a args)
                                       (e env))
                              (cond ((symbol? f)
-                                    (let ((extended-env (extend-env e (list f))))
-                                      (env-set! extended-env f a)
-                                      (evaluate-list extended-env
-                                                     body
-                                                     resulting-value)))
+                                    (evaluate-list (extend-env e f (box a))
+                                                   body
+                                                   resulting-value))
                                    ((and (empty? f) (empty? a))
                                     (evaluate-list e body resulting-value))
                                    ((or (empty? f) (empty? a))
                                     (error "Arity mismatch" (length args)))
                                    (else
-                                    (let ((extended-env (extend-env e (list (car f)))))
-                                      (env-set! extended-env (car f) (car a))
-                                      (loop (cdr f) (cdr a) extended-env)))))))))
+                                    (loop (cdr f)
+                                          (cdr a)
+                                          (extend-env e (car f) (box (car a)))))))))))
 
                 (else
                  (begin
@@ -159,7 +154,7 @@
                                    (evaluate-args env '() (cdr exp)
                                                   (lambda (_ args)
                                                     (cont env (apply op args))))
-                                   (error "Invalid function specified at" (car exp)))))))))))
+                                   (error "Invalid function specified at" (car exp) env))))))))))
 
 (define (evaluate-list env exps cont)
   (define (evaluate-list-aux env-acc acc exps cont)

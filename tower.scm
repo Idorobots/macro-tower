@@ -35,11 +35,9 @@
      (let ((next-level (create-level)))
        (set-level-env! next-level
                        (extend-env (level-env next-level)
-                                   '(eval)))
-       (env-set! (level-env next-level)
-                 'eval
-                 (lambda (value)
-                   (do-eval value next-level)))
+                                   'eval
+                                   (lambda (value)
+                                     (do-eval value next-level))))
        ;; NOTE The expander itself doesn't need expansion.
        (do-pure-eval expand-definition
                      next-level)

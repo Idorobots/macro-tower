@@ -42,16 +42,14 @@
                        (cdr (cdr e))))))))))
 
 (do-eval `(eval-in-expansion-world
-           (begin ,better-expander
-                  ,local-macros
+           (begin ,local-macros
                   ,global-macros))
          level-0)
 
 (do-eval `(eval-in-expansion-world
            (eval-in-expansion-world
-            (begin ,better-expander
-                  ,local-macros
-                  ,global-macros)))
+            (begin ,local-macros
+                   ,global-macros)))
          level-0)
 
 (do-eval '(let-abbreviation
@@ -78,11 +76,11 @@
          level-0)
 
 (do-eval '(begin
-            (define foo (trace-lambda (x)
+            (define bar (trace-lambda (x)
                                       (if (eq? x 23)
                                           x
-                                          (+ (foo (+ 1 x)) 1))))
-            (foo 5))
+                                          (+ (bar (+ 1 x)) 1))))
+            (bar 5))
          level-0)
 
 ;; FIXME Requires three loads to work correctly due to how really-expand maintains the same macro-env throughout the expansion:
