@@ -148,7 +148,8 @@
                          (evaluate env (car args)
                                    (lambda (env-acc arg)
                                      (evaluate-args env-acc (cons arg acc) (cdr args) cont)))))
-                   (evaluate env (car exp)
+                   (evaluate env
+                             (car exp)
                              (lambda (_ op)
                                (if (procedure? op)
                                    (evaluate-args env '() (cdr exp)

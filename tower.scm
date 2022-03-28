@@ -2,8 +2,8 @@
 
 (load "evaluate.scm")
 
-(define (make-level env next)
-  (vector 'level env next))
+(define (make-level env next level)
+  (vector 'level env next level))
 
 (define (level-env l)
   (vector-ref l 1))
@@ -14,7 +14,16 @@
 (define (level-next l)
   (vector-ref l 2))
 
+(define (level-level l)
+  (vector-ref l 3))
+
 (define (do-pure-eval expr level)
+  (evaluate (level-env level)
+            expr
+            resulting-value))
+
+(define (do-stateful-eval expr level)
+  ;; NOTE Persists the modified environment for further executions.
   (evaluate (level-env level)
             expr
             (lambda (env result)
@@ -22,26 +31,28 @@
               result)))
 
 (define (do-eval expr level)
-  (do-pure-eval (do-expand expr level) level))
+  (do-stateful-eval (do-expand expr level) level))
 
 (define (do-expand expr level)
+  ;; NOTE A call to `expand` should not create side effects on the environment, unless an inner eval is used.
   (do-pure-eval `(expand ',expr)
                 (force (level-next level))))
 
-(define (create-level)
+(define (create-level level)
   (make-level
    (create-standard-env)
    (delay
-     (let ((next-level (create-level)))
+     (let ((next-level (create-level (+ 1 level))))
        (set-level-env! next-level
                        (extend-env (level-env next-level)
                                    'eval
-                                   (lambda (value)
-                                     (do-eval value next-level))))
-       ;; NOTE The expander itself doesn't need expansion.
-       (do-pure-eval expand-definition
-                     next-level)
-       next-level))))
+                                   (lambda (expr)
+                                     (do-eval expr next-level))))
+       ;; NOTE The expander itself doesn't need expansion, but we retain its definitions.
+       (do-stateful-eval expand-definition
+                         next-level)
+       next-level))
+   level))
 
 ;; Bare bones expander.
 (define minimal-expander
@@ -100,11 +111,11 @@
 (define expand-definition better-expander)
 
 ;; Repl
-(define level-0 (create-level))
+(define top-level (create-level 0))
 
 (define (repl)
   (let loop ()
     (display ">>> ")
-    (display (do-eval (read) level-0))
+    (display (do-eval (read) top-level))
     (newline)
     (loop)))

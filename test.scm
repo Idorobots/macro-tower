@@ -1,17 +1,21 @@
 ;; Some tests for the macro tower.
 
-(do-eval '(begin (define foo 23) foo) level-0)
+(do-eval '(begin (define foo 23) foo) top-level)
 
-(do-eval '(eval-in-expansion-world (begin (define foo 5) foo)) level-0)
+(do-eval '(eval-in-expansion-world (begin (define foo 5) foo)) top-level)
+
+(do-eval 'foo top-level)
+
+(do-eval '(eval-in-expansion-world foo) top-level)
 
 (do-eval '(eval-in-expansion-world
            (begin (install-macro-form!
                    'foo
                    (lambda (e m)
                      (list 'equal? (car e) (cadr e))))))
-         level-0)
+         top-level)
 
-(do-eval '(foo 23) level-0)
+(do-eval '(foo 23) top-level)
 
 (define local-macros
   '(install-macro-form!
@@ -44,13 +48,13 @@
 (do-eval `(eval-in-expansion-world
            (begin ,local-macros
                   ,global-macros))
-         level-0)
+         top-level)
 
 (do-eval `(eval-in-expansion-world
            (eval-in-expansion-world
             (begin ,local-macros
                    ,global-macros)))
-         level-0)
+         top-level)
 
 (do-eval '(let-abbreviation
            ((progn . body)
@@ -60,7 +64,7 @@
              (sequence (display "Use begin instead of progn!")
                        (cons 'begin body))))
            (progn 5 23))
-         level-0)
+         top-level)
 
 (do-eval '(define-abbreviation (trace-lambda args . body)
             (list 'lambda args
@@ -73,7 +77,7 @@
                            (newline)
                            result)
                         (cons 'begin body))))
-         level-0)
+         top-level)
 
 (do-eval '(begin
             (define bar (trace-lambda (x)
@@ -81,7 +85,7 @@
                                           x
                                           (+ (bar (+ 1 x)) 1))))
             (bar 5))
-         level-0)
+         top-level)
 
 ;; FIXME Requires three loads to work correctly due to how really-expand maintains the same macro-env throughout the expansion:
 ;; - first one installs the progn macro and fails on the invocation,
@@ -96,4 +100,4 @@
                    (sequence (display "Use begin instead of progn!")
                              (cons 'begin body)))
                  (progn 23 5))
-         level-0)
+         top-level)
